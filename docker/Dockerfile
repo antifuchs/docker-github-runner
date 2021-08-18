@@ -1,8 +1,7 @@
-ARG FROM=debian:buster-slim
+ARG FROM=debian:bullseye-slim
 FROM ${FROM}
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG GIT_VERSION="2.26.2"
 ARG GH_RUNNER_VERSION
 ARG DOCKER_COMPOSE_VERSION="1.27.4"
 
@@ -37,18 +36,19 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
         sudo \
         supervisor \
         jq \
+        libicu67 \
+        git-core \
         iputils-ping \
         build-essential \
         zlib1g-dev \
         gettext \
         liblttng-ust0 \
         libcurl4-openssl-dev \
-        openssh-client && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
-
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN chmod 644 /etc/supervisor/conf.d/supervisord.conf
+        openssh-client \
+        sudo \
+        rsync \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Install Docker CLI
 RUN curl -fsSL https://get.docker.com -o- | sh && \
@@ -60,16 +60,6 @@ RUN curl -L -o /usr/local/bin/docker-compose \
     "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" && \
     chmod +x /usr/local/bin/docker-compose
 
-RUN cd /tmp && \
-    curl -sL -o git.tgz \
-    https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.gz && \
-    tar zxf git.tgz  && \
-    cd git-${GIT_VERSION}  && \
-    ./configure --prefix=/usr  && \
-    make && \
-    make install && \
-    rm -rf /tmp/*
-
 RUN mkdir -p /home/runner ${AGENT_TOOLSDIRECTORY}
 
 WORKDIR /home/runner
@@ -79,11 +69,19 @@ RUN GH_RUNNER_VERSION=${GH_RUNNER_VERSION:-$(curl --silent "https://api.github.c
     && tar -zxf actions-runner-linux-x64-${GH_RUNNER_VERSION}.tar.gz \
     && rm -f actions-runner-linux-x64-${GH_RUNNER_VERSION}.tar.gz \
     && ./bin/installdependencies.sh \
-    && chown -R root: /home/runner \
+    && mkdir /home/runner/_diag \
+    && useradd runner \
+    && usermod -aG sudo runner \
+    && chown -R runner /home/runner \
+    && echo "runner ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+RUN chmod 644 /etc/supervisor/conf.d/supervisord.conf
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+USER runner
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
